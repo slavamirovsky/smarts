@@ -1,0 +1,53 @@
+const mic = require('microphone');
+const { OpenAI } = require('openai');
+const { Writable } = require('stream');
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let transcriptBuffer = '';
+let whisperStream;
+let streamResetInterval;
+
+function startMicStream() {
+  mic.startCapture();
+  const audioStream = mic.getAudioStream();
+
+  function createStream() {
+    whisperStream = openai.audio.transcriptions.createStream({
+      model: process.env.MODEL_WHISPER,
+      response_format: 'text',
+      language: 'en'
+    });
+
+    audioStream.pipe(whisperStream);
+    whisperStream.pipe(new Writable({
+      write(chunk, _enc, next) {
+        transcriptBuffer += chunk.toString('utf8');
+        next();
+      }
+    }));
+  }
+
+  createStream();
+
+  // Reset every 10 minutes
+  streamResetInterval = setInterval(() => {
+    try {
+      whisperStream?.destroy();
+    } catch (e) {}
+    createStream();
+  }, 10 * 60 * 1000);
+}
+
+function stopMicStream() {
+  mic.stopCapture();
+  whisperStream?.destroy();
+  clearInterval(streamResetInterval);
+}
+
+function getRecentTranscript() {
+  const out = transcriptBuffer;
+  transcriptBuffer = '';
+  return out;
+}
+
+module.exports = { startMicStream, stopMicStream, getRecentTranscript };
